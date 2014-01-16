@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title></title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+                # CanCan with includes
+
+
+
+# load_and_authorize_resource
+```ruby
+class ProjectsController < ApplicationController
+  load_and_authorize_resource
+  # ...
+end
+```
+  equal
+```ruby
+class ProjectsController < ApplicationController
+  def index
+    authorize! :index, Project
+    @projects = Project.accessible_by(current_ability)
+  end
+```
+
+
+
+# 例えば Project に Client が繋がっているとする
+```ruby
+belongs_to :client
+```
+
+view で client 名を表示などすると、
+
+```ruby
+<% projects.each do |project %>
+  <%= project.client.name %>
+<% end %>
+```
+
+
+
+# N+1 が発生！
+```ruby
+   (2.3ms)  SELECT COUNT(*) FROM `projects` WHERE (`projects`.`deleted_at` IS NULL)
+  Project Load (2.3ms)  SELECT `projects`.* FROM `projects` WHERE (`projects`.`deleted_at` IS NULL)
+  Client Load (2.6ms)  SELECT `clients`.* FROM `clients` WHERE `clients`.`id` = 1 AND (`clients`.`deleted_at` IS NULL) LIMIT 1
+  CACHE (0.0ms)  SELECT `clients`.* FROM `clients` WHERE `clients`.`id` = 1 AND (`clients`.`deleted_at` IS NULL) LIMIT 1
+  CACHE (0.0ms)  SELECT `clients`.* FROM `clients` WHERE `clients`.`id` = 1 AND
+   (2.3ms)  SELECT COUNT(*) FROM `projects` WHERE (`projects`.`deleted_at` IS NULL)
+```
+
+
+
+# 素直に
+```ruby
+    @projects = Project.includes(:client)
+```
+
+
+
+# 2回呼ばれるのでは？
+
+
+
+# そんなことなかった！
+```ruby
+   (2.2ms)  SELECT COUNT(*) FROM `projects` WHERE (`projects`.`deleted_at` IS NULL)
+  Project Load (2.3ms)  SELECT `projects`.* FROM `projects` WHERE (`projects`.`deleted_at` IS NULL)
+  Client Load (2.8ms)  SELECT `clients`.* FROM `clients` WHERE `clients`.`id` IN (1, 41) AND (`clients`.`deleted_at` IS NULL)
+  ...
+```
+
+
+
+# なぜ？
+
+
+
+# load_and_authorize_resource
+```
+    def load_and_authorize_resource
+      load_resource
+      authorize_resource
+    end
+```
+
+
+
+# load_resource
+```
+    def load_resource
+      unless skip?(:load)
+        if load_instance?
+          self.resource_instance ||= load_resource_instance
+        elsif load_collection?
+          self.collection_instance ||= load_collection
+        end
+      end
+    end
+```
+
+
+# load_collection?
+```ruby
+    def load_collection?
+      resource_base.respond_to?(:accessible_by) && !current_ability.has_block?(authorization_action, resource_class)
+    end
+```
+```ruby
+    def current_ability
+      @current_ability ||= ::Ability.new(current_user)
+    end
+```
+
+
+# load_collection
+```
+    def load_collection
+      resource_base.accessible_by(current_ability, authorization_action)
+    end
+```
+
+
+
+
+
+# resource_base
+```ruby
+    def resource_base
+      if @options[:through]
+        if parent_resource
+          @options[:singleton] ? resource_class : parent_resource.send(@options[:through_association] || name.to_s.pluralize)
+        elsif @options[:shallow]
+          resource_class
+        else
+          raise AccessDenied.new(nil, authorization_action, resource_class) # maybe this should be a record not found error instead?
+        end
+      else
+        resource_class
+      end
+    end
+```
+
+
+# resource_class
+```
+    def resource_class
+      case @options[:class]
+      when false  then name.to_sym
+      when nil    then namespaced_name.to_s.camelize.constantize
+      when String then @options[:class].constantize
+      else @options[:class]
+      end
+    end
+```
+> If the model class is namespaced differently than the controller you will need to specify the :class option.
+```ruby
+class ProductsController < ApplicationController
+  load_and_authorize_resource :class => "Store::Product"
+end
+```
+```ruby
+    def name
+      @name || name_from_controller
+    end
+    def name_from_controller
+      @params[:controller].sub("Controller", "").underscore.split('/').last.singularize
+    end
+```
+
+
+
+# accessible_by
+```
+module CanCan
+
+  # This module adds the accessible_by class method to a model. It is included in the model adapters.
+  module ModelAdditions
+    module ClassMethods
+      # Returns a scope which fetches only the records that the passed ability
+      # can perform a given action on. The action defaults to :index. This
+      # is usually called from a controller and passed the +current_ability+.
+      #
+      #   @articles = Article.accessible_by(current_ability)
+      #
+      # Here only the articles which the user is able to read will be returned.
+      # If the user does not have permission to read any articles then an empty
+      # result is returned. Since this is a scope it can be combined with any
+      # other scopes or pagination.
+      #
+      # An alternative action can optionally be passed as a second argument.
+      #
+      #   @articles = Article.accessible_by(current_ability, :update)
+      #
+      # Here only the articles which the user can update are returned.
+      def accessible_by(ability, action = :index)
+        ability.model_adapter(self, action).database_records
+      end
+    end
+
+    def self.included(base)
+      base.extend ClassMethods
+    end
+  end
+end
+```
+
+
+# model_adapter
+```ruby
+    def model_adapter(model_class, action)
+      adapter_class = ModelAdapters::AbstractAdapter.adapter_class(model_class)
+      adapter_class.new(model_class, relevant_rules_for_query(action, model_class))
+    end
+```
+
+
+# relevant_rules_for_query
+```ruby
+    def relevant_rules_for_query(action, subject)
+      relevant_rules(action, subject).each do |rule|
+        if rule.only_block?
+          raise Error, "The accessible_by call cannot be used with a block 'can' definition. The SQL cannot be determined for #{action.inspect} #{subject.inspect}"
+        end
+      end
+    end
+```
+
+
+# relevant_rules
+```ruby
+    # Returns an array of Rule instances which match the action and subject
+    # This does not take into consideration any hash conditions or block statements
+    def relevant_rules(action, subject)
+      rules.reverse.select do |rule|
+        rule.expanded_actions = expand_actions(rule.actions)
+        rule.relevant? action, subject
+      end
+    end
+```
+
+
+# expand_actions
+```
+    def expand_actions(actions)
+      actions.map do |action|
+        aliased_actions[action] ? [action, *expand_actions(aliased_actions[action])] : action
+      end.flatten
+    end
+
+    # Alias one or more actions into another one.
+    #
+    #   alias_action :update, :destroy, :to => :modify
+    #   can :modify, Comment
+    #
+    # Then :modify permission will apply to both :update and :destroy requests.
+    #
+    #   can? :update, Comment # => true
+    #   can? :destroy, Comment # => true
+```
+
+
+```
+    # Matches both the subject and action, not necessarily the conditions
+    def relevant?(action, subject)
+      subject = subject.values.first if subject.class == Hash
+      @match_all || (matches_action?(action) && matches_subject?(subject))
+    end
+```
+
+
+```
+    def matches_action?(action)
+      @expanded_actions.include?(:manage) || @expanded_actions.include?(action)
+    end
+```
+
+
+```
+    def matches_subject?(subject)
+      @subjects.include?(:all) || @subjects.include?(subject) || matches_subject_class?(subject)
+    end
+
+    def matches_subject_class?(subject)
+      @subjects.any? { |sub| sub.kind_of?(Module) && (subject.kind_of?(sub) || subject.class.to_s == sub.to_s || subject.kind_of?(Module) && subject.ancestors.include?(sub)) }
+    end
+```
+
+
+```
+      def database_records
+        if override_scope
+          @model_class.scoped.merge(override_scope)
+        elsif @model_class.respond_to?(:where) && @model_class.respond_to?(:joins)
+          mergeable_conditions = @rules.select {|rule| rule.unmergeable? }.blank?
+          if mergeable_conditions
+            @model_class.where(conditions).joins(joins)
+          else
+            @model_class.where(*(@rules.map(&:conditions))).joins(joins)
+          end
+        else
+          @model_class.scoped(:conditions => conditions, :joins => joins)
+        end
+      end
+```
+
+
+```
+      def override_scope
+        conditions = @rules.map(&:conditions).compact
+        if defined?(ActiveRecord::Relation) && conditions.any? { |c| c.kind_of?(ActiveRecord::Relation) }
+          if conditions.size == 1
+            conditions.first
+          else
+            rule = @rules.detect { |rule| rule.conditions.kind_of?(ActiveRecord::Relation) }
+            raise Error, "Unable to merge an Active Record scope with other conditions. Instead use a hash or SQL for #{rule.actions.first} #{rule.subjects.first} ability."
+          end
+        end
+      end
+```
+
+
+```
+      def merge_conditions(sql, conditions_hash, behavior)
+        if conditions_hash.blank?
+          behavior ? true_sql : false_sql
+        else
+          conditions = sanitize_sql(conditions_hash)
+          case sql
+          when true_sql
+            behavior ? true_sql : "not (#{conditions})"
+          when false_sql
+            behavior ? conditions : false_sql
+          else
+            behavior ? "(#{conditions}) OR (#{sql})" : "not (#{conditions}) AND (#{sql})"
+          end
+        end
+      end
+```
+
+
+
+
+```
+    # The object to load this resource through.
+    def parent_resource
+      parent_name && fetch_parent(parent_name)
+    end
+```
+
+
+# load_instance?
+```ruby
+    def load_instance?
+      parent? || member_action?
+    end
+```
+
+
+# parent?
+```
+    def parent?
+      @options.has_key?(:parent) ? @options[:parent] : @name && @name != name_from_controller.to_sym
+    end
+```
+> If the model is named differently than the controller, then you may explicitly name the model that should be loaded; however, you must specify that it is not a parent in a nested routing situation, ie:
+```
+class ArticlesController < ApplicationController
+  load_and_authorize_resource :post, :parent => false
+end
+```
+
+
+# member_action?
+```ruby
+    def member_action?
+      new_actions.include?(@params[:action].to_sym) || @options[:singleton] || ( (@params[:id] || @params[@options[:id_param]]) && !collection_actions.include?(@params[:action].to_sym))
+    end
+
+    def new_actions
+      [:new, :create] + [@options[:new]].flatten
+    end
+
+    def collection_actions
+      [:index] + [@options[:collection]].flatten
+    end
+```
+
+
+
+# load_resource_instance
+```ruby
+        if load_instance?
+          self.resource_instance ||= load_resource_instance
+```
+```ruby
+    def load_resource_instance
+      if !parent? && new_actions.include?(@params[:action].to_sym)
+        build_resource
+      elsif id_param || @options[:singleton]
+        find_resource
+      end
+    end
+```
+
+
+#
+
+# authorize_resource
+```
+    def authorize_resource
+      unless skip?(:authorize)
+        @controller.authorize!(authorization_action, resource_instance || resource_class_with_parent)
+      end
+    end
+```
+```
+    def authorize!(*args)
+      @_authorized = true
+      current_ability.authorize!(*args)
+    end
+```
+
+```
+    # See ControllerAdditions#authorize! for documentation.
+    def authorize!(action, subject, *args)
+      message = nil
+      if args.last.kind_of?(Hash) && args.last.has_key?(:message)
+        message = args.pop[:message]
+      end
+      if cannot?(action, subject, *args)
+        message ||= unauthorized_message(action, subject)
+        raise AccessDenied.new(message, action, subject)
+      end
+      subject
+    end
+```
+
+```
+    def cannot?(*args)
+      !can?(*args)
+    end
+```
+```
+    def can?(action, subject, *extra_args)
+      match = relevant_rules_for_match(action, subject).detect do |rule|
+        rule.matches_conditions?(action, subject, extra_args)
+      end
+      match ? match.base_behavior : false
+    end
+```
+```
+    def relevant_rules_for_match(action, subject)
+      relevant_rules(action, subject).each do |rule|
+        if rule.only_raw_sql?
+          raise Error, "The can? and cannot? call cannot be used with a raw sql 'can' definition. The checking code cannot be determined for #{action.inspect} #{subject.inspect}"
+        end
+      end
+    end
+```
+
+```
+    # Check if the user has permission to perform a given action on an object.
+    #
+    #   can? :destroy, @project
+    #
+    # You can also pass the class instead of an instance (if you don't have one handy).
+    #
+    #   can? :create, Project
+    #
+    # Nested resources can be passed through a hash, this way conditions which are
+    # dependent upon the association will work when using a class.
+    #
+    #   can? :create, @category => Project
+    #
+    # Any additional arguments will be passed into the "can" block definition. This
+    # can be used to pass more information about the user's request for example.
+    #
+    #   can? :create, Project, request.remote_ip
+    #
+    #   can :create Project do |project, remote_ip|
+    #     # ...
+    #   end
+    #
+    # Not only can you use the can? method in the controller and view (see ControllerAdditions),
+    # but you can also call it directly on an ability instance.
+    #
+    #   ability.can? :destroy, @project
+    #
+    # This makes testing a user's abilities very easy.
+    #
+    #   def test "user can only destroy projects which he owns"
+    #     user = User.new
+    #     ability = Ability.new(user)
+    #     assert ability.can?(:destroy, Project.new(:user => user))
+    #     assert ability.cannot?(:destroy, Project.new)
+    #   end
+    #
+```
+
+```
+    # Matches the block or conditions hash
+    def matches_conditions?(action, subject, extra_args)
+      if @match_all
+        call_block_with_all(action, subject, extra_args)
+      elsif @block && !subject_class?(subject)
+        @block.call(subject, *extra_args)
+      elsif @conditions.kind_of?(Hash) && subject.class == Hash
+        nested_subject_matches_conditions?(subject)
+      elsif @conditions.kind_of?(Hash) && !subject_class?(subject)
+        matches_conditions_hash?(subject)
+      else
+        # Don't stop at "cannot" definitions when there are conditions.
+        @conditions.empty? ? true : @base_behavior
+      end
+    end
+```
+
+#
+```
+    def can(action = nil, subject = nil, conditions = nil, &block)
+      rules << Rule.new(true, action, subject, conditions, block)
+    end
+```
+
+```
+    def call_block_with_all(action, subject, extra_args)
+      if subject.class == Class
+        @block.call(action, subject, nil, *extra_args)
+      else
+        @block.call(action, subject.class, subject, *extra_args)
+      end
+    end
+```
+
+
+
+```
+class ProjectsController < ApplicationController
+  load_and_authorize_resource
+
+  def index
+    Rails.logger.debug "@projects.class #{@projects.class}"
+```
+```
+@projects.class ActiveRecord::Relation
+```
+
+```
+  def show
+    Rails.logger.debug "@project.class #{@project.class}"
+    @project = Project.find(params[:id], include: [:project_images, :project_documents, {:staffs => :user}])
+```
+
+```
+  Project Load (2.0ms)  SELECT `projects`.* FROM `projects` WHERE `projects`.`id` = 2 AND (`projects`.`deleted_at` IS NULL) LIMIT 1
+@project.class Project
+  CACHE (0.0ms)  SELECT `projects`.* FROM `projects` WHERE `projects`.`id` = 2 AND (`projects`.`deleted_at` IS NULL) LIMIT 1
+ ```
+
+```
+    def find_resource
+      if @options[:singleton] && parent_resource.respond_to?(name)
+        parent_resource.send(name)
+      else
+        if @options[:find_by]
+          if resource_base.respond_to? "find_by_#{@options[:find_by]}!"
+            resource_base.send("find_by_#{@options[:find_by]}!", id_param)
+          elsif resource_base.respond_to? "find_by"
+            resource_base.send("find_by", { @options[:find_by].to_sym => id_param })
+          else
+            resource_base.send(@options[:find_by], id_param)
+          end
+        else
+          adapter.find(resource_base, id_param)
+        end
+      end
+    end
+```
+
+```
+      # Override if you need custom find behavior
+      def self.find(model_class, id)
+        model_class.find(id)
+      end
+```
+
+#
+
+
+
+
+# 注文が遅い料理店
+```
+    @projects = Project.page(params[:page]).
+      per(15).order('due_at DESC')
+```
+
+```
+(5.6ms)  SELECT COUNT(count_column) FROM (SELECT 1 AS count_column FROM `projects` WHERE (`projects`.`deleted_at` IS NULL) LIMIT 15 OFFSET 0) subquery_for_count
+Project Load (3.4ms)  SELECT `projects`.* FROM `projects` WHERE (`projects`.`deleted_at` IS NULL) ORDER BY due_at DESC LIMIT 15 OFFSET 0
+```
+
+```
+EXPLAIN for: SELECT  `projects`.* FROM `projects`  WHERE (`projects`.`deleted_at` IS NULL) ORDER BY due_at DESC LIMIT 15 OFFSET 0
++----+-------------+----------+------+---------------+------+---------+------+------+-----------------------------+
+| id | select_type | table    | type | possible_keys | key  | key_len | ref  | rows | Extra                       |
++----+-------------+----------+------+---------------+------+---------+------+------+-----------------------------+
+|  1 | SIMPLE      | projects | ALL  | NULL          | NULL | NULL    | NULL |    7 | Using where; Using filesort |
++----+-------------+----------+------+---------------+------+---------+------+------+-----------------------------+
+1 row in set (0.01 sec)
+```
+
+
+
+# Using filesort
+
+
+
+
+# order('due_at DESC') を消す
+```
+    @projects = Project.page(params[:page]).
+      per(15)
+```
+```
+EXPLAIN for: SELECT  `projects`.* FROM `projects`  WHERE (`projects`.`deleted_at` IS NULL) LIMIT 15 OFFSET 0
++----+-------------+----------+------+---------------+------+---------+------+------+-------------+
+| id | select_type | table    | type | possible_keys | key  | key_len | ref  | rows | Extra       |
++----+-------------+----------+------+---------------+------+---------+------+------+-------------+
+|  1 | SIMPLE      | projects | ALL  | NULL          | NULL | NULL    | NULL |    7 | Using where |
++----+-------------+----------+------+---------------+------+---------+------+------+-------------+
+1 row in set (0.00 sec)
+```
+
+
+
+# index がない カラムで order するときは、気をつける
+```
+mysql> alter table projects add index (due_at);
+```
+```
+```
+
+
+
+
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>

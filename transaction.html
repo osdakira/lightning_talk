@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title></title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+                # ActiveRecord::Base.transaction
+
+
+
+```
+      def transaction(options = {}, &block)
+        # See the ConnectionAdapters::DatabaseStatements#transaction API docs.
+        connection.transaction(options, &block)
+      end
+```
+```
+      def after_commit(*args, &block)
+        options = args.last
+        if options.is_a?(Hash) && options[:on]
+          options[:if] = Array.wrap(options[:if])
+          options[:if] << "transaction_include_action?(:#{options[:on]})"
+        end
+        set_callback(:commit, :after, *args, &block)
+      end
+```
+```
+      def after_rollback(*args, &block)
+        options = args.last
+        if options.is_a?(Hash) && options[:on]
+          options[:if] = Array.wrap(options[:if])
+          options[:if] << "transaction_include_action?(:#{options[:on]})"
+        end
+        set_callback(:rollback, :after, *args, &block)
+      end
+```
+```
+    def transaction(options = {}, &block)
+      self.class.transaction(options, &block)
+    end
+```
+```
+    def destroy #:nodoc:
+      with_transaction_returning_status { super }
+    end
+```
+```
+    def save(*) #:nodoc:
+      rollback_active_record_state! do
+        with_transaction_returning_status { super }
+      end
+    end
+```
+```
+    # Reset id and @new_record if the transaction rolls back.
+    def rollback_active_record_state!
+      remember_transaction_record_state
+      yield
+    rescue Exception
+      IdentityMap.remove(self) if IdentityMap.enabled?
+      restore_transaction_record_state
+      raise
+    ensure
+      clear_transaction_record_state
+    end
+```
+```
+    def committed! #:nodoc:
+      run_callbacks :commit
+    ensure
+      clear_transaction_record_state
+    end
+```
+```
+    def rolledback!(force_restore_state = false) #:nodoc:
+      run_callbacks :rollback
+    ensure
+      IdentityMap.remove(self) if IdentityMap.enabled?
+      restore_transaction_record_state(force_restore_state)
+    end
+```
+```
+    def with_transaction_returning_status
+      status = nil
+      self.class.transaction do
+        add_to_transaction
+        status = yield
+        raise ActiveRecord::Rollback unless status
+      end
+      status
+    end
+```
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>

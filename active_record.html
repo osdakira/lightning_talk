@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title></title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+                # ActiveRecord を読む
+
+
+
+```
+User.eager_load(:posts)
+=> SELECT "users"."id" AS t0_r0, "users"."name" AS t0_r1, ...
+FROM "users" LEFT OUTER JOIN "posts" ON "posts"."user_id" =
+"users"."id"
+```
+http://railsdoc.com/references/eager_load
+
+
+
+# includes
+```
+Page.includes(:category)
+# SELECT "pages".* FROM "pages"
+# SELECT "categories".* FROM "categories" WHERE "categories"."id" IN (1)
+```
+
+
+
+```
+    def includes(*args)
+      args.reject! {|a| a.blank? }
+
+      return self if args.empty?
+
+      relation = clone
+      relation.includes_values = (relation.includes_values + args).flatten.uniq
+      relation
+    end
+```
+
+
+```
+    def arel
+      @arel ||= with_default_scope.build_arel
+    end
+
+    def build_arel
+      arel = table.from table
+
+      build_joins(arel, @joins_values) unless @joins_values.empty?
+
+      collapse_wheres(arel, (@where_values - ['']).uniq)
+
+      arel.having(*@having_values.uniq.reject{|h| h.blank?}) unless @having_values.empty?
+
+      arel.take(connection.sanitize_limit(@limit_value)) if @limit_value
+      arel.skip(@offset_value.to_i) if @offset_value
+
+      arel.group(*@group_values.uniq.reject{|g| g.blank?}) unless @group_values.empty?
+
+      order = @order_values
+      order = reverse_sql_order(order) if @reverse_order_value
+      arel.order(*order.uniq.reject{|o| o.blank?}) unless order.empty?
+
+      build_select(arel, @select_values.uniq)
+
+      arel.distinct(@uniq_value)
+      arel.from(@from_value) if @from_value
+      arel.lock(@lock_value) if @lock_value
+
+      arel
+    end
+```
+
+```
+    def find(*args)
+      return to_a.find { |*block_args| yield(*block_args) } if block_given?
+
+      options = args.extract_options!
+
+      if options.present?
+        apply_finder_options(options).find(*args)
+      else
+        case args.first
+        when :first, :last, :all
+          send(args.first)
+        else
+          find_with_ids(*args)
+        end
+      end
+    end
+```
+
+```
+[7] pry(main)> User.find{|user| user.id == 1}
+  User Load (1.2ms)  SELECT `users`.* FROM `users` WHERE (`users`.`deleted_at` IS NULL)
+=> #<User id: 1, ...
+```
+
+
+```
+    def find_with_ids(*ids)
+      return to_a.find { |*block_args| yield(*block_args) } if block_given?
+
+      expects_array = ids.first.kind_of?(Array)
+      return ids.first if expects_array && ids.first.empty?
+
+      ids = ids.flatten.compact.uniq
+
+      case ids.size
+      when 0
+        raise RecordNotFound, "Couldn't find #{@klass.name} without an ID"
+      when 1
+        result = find_one(ids.first)
+        expects_array ? [ result ] : result
+      else
+        find_some(ids)
+      end
+    end
+```
+
+```
+    def merge(r)
+      return self unless r
+      return to_a & r if r.is_a?(Array)
+
+      merged_relation = clone
+
+      r = r.with_default_scope if r.default_scoped? && r.klass != klass
+
+      Relation::ASSOCIATION_METHODS.each do |method|
+        value = r.send(:"#{method}_values")
+
+        unless value.empty?
+          if method == :includes
+            merged_relation = merged_relation.includes(value)
+          else
+            merge_relation_method(merged_relation, method, value)
+          end
+        end
+      end
+```
+
+```
+      def create(attributes = nil, options = {}, &block)
+        if attributes.is_a?(Array)
+          attributes.collect { |attr| create(attr, options, &block) }
+        else
+          object = new(attributes, options, &block)
+          object.save
+          object
+        end
+      end
+```
+
+```
+    def update_attribute(name, value)
+      name = name.to_s
+      raise ActiveRecordError, "#{name} is marked as readonly" if self.class.readonly_attributes.include?(name)
+      send("#{name}=", value)
+      save(:validate => false)
+    end
+```
+```
+    def update_column(name, value)
+      name = name.to_s
+      raise ActiveRecordError, "#{name} is marked as readonly" if self.class.readonly_attributes.include?(name)
+      raise ActiveRecordError, "can not update on a new record object" unless persisted?
+
+      updated_count = self.class.unscoped.update_all({ name => value }, self.class.primary_key => id)
+
+      raw_write_attribute(name, value)
+
+      updated_count == 1
+    end
+```
+```
+    def update_attributes(attributes, options = {})
+      # The following transaction covers any possible database side-effects of the
+      # attributes assignment. For example, setting the IDs of a child collection.
+      with_transaction_returning_status do
+        self.assign_attributes(attributes, options)
+        save
+      end
+    end
+```
+```
+    def increment(attribute, by = 1)
+      self[attribute] ||= 0
+      self[attribute] += by
+      self
+    end
+```
+```
+    def toggle(attribute)
+      self[attribute] = !send("#{attribute}?")
+      self
+    end
+```
+```
+    def reload(options = nil)
+      clear_aggregation_cache
+      clear_association_cache
+
+      IdentityMap.without do
+        fresh_object = self.class.unscoped { self.class.find(self.id, options) }
+        @attributes.update(fresh_object.instance_variable_get('@attributes'))
+      end
+
+      @attributes_cache = {}
+      self
+    end
+```
+```
+    def touch(name = nil)
+      attributes = timestamp_attributes_for_update_in_model
+      attributes << name if name
+
+      unless attributes.empty?
+        current_time = current_time_from_proper_timezone
+        changes = {}
+
+        attributes.each do |column|
+          changes[column.to_s] = write_attribute(column.to_s, current_time)
+        end
+
+        changes[self.class.locking_column] = increment_lock if locking_enabled?
+
+        @changed_attributes.except!(*changes.keys)
+        primary_key = self.class.primary_key
+        self.class.unscoped.update_all(changes, { primary_key => self[primary_key] }) == 1
+      end
+    end
+```
+
+```
+
+
+```
+      module ClassMethods
+        DEFAULT_LOCKING_COLUMN = 'lock_version'
+
+        # Returns true if the +lock_optimistically+ flag is set to true
+        # (which it is, by default) and the table includes the
+        # +locking_column+ column (defaults to +lock_version+).
+        def locking_enabled?
+          lock_optimistically && columns_hash[locking_column]
+        end
+```
+
+```
+    CALLBACKS = [
+      :after_initialize, :after_find, :after_touch, :before_validation, :after_validation,
+      :before_save, :around_save, :after_save, :before_create, :around_create,
+      :after_create, :before_update, :around_update, :after_update,
+      :before_destroy, :around_destroy, :after_destroy, :after_commit, :after_rollback
+    ]
+```
+
+```
+    def update(*args) #:nodoc:
+      if should_record_timestamps?
+        current_time = current_time_from_proper_timezone
+
+        timestamp_attributes_for_update_in_model.each do |column|
+          column = column.to_s
+          next if attribute_changed?(column)
+          write_attribute(column, current_time)
+        end
+      end
+      super
+    end
+```
+
+```
+      def scope
+        scope = klass.unscoped
+        scope = scope.extending(*Array.wrap(options[:extend]))
+
+        # It's okay to just apply all these like this. The options will only be present if the
+        # association supports that option; this is enforced by the association builder.
+        scope = scope.apply_finder_options(options.slice(
+          :readonly, :include, :order, :limit, :joins, :group, :having, :offset, :select))
+
+        if options[:through] && !options[:include]
+          scope = scope.includes(source_options[:include])
+        end
+
+        scope = scope.uniq if options[:uniq]
+
+        add_constraints(scope)
+      end
+```
+```
+    def new(*args, &block)
+      scoping { @klass.new(*args, &block) }
+    end
+    alias build new
+```
+```
+    def create(*args, &block)
+      scoping { @klass.create(*args, &block) }
+    end
+```
+```
+    def first_or_initialize(attributes = nil, options = {}, &block)
+      first || new(attributes, options, &block)
+    end
+```
+```
+    def explain
+      _, queries = collecting_queries_for_explain { exec_queries }
+      exec_explain(queries)
+    end
+```
+```
+    def exec_queries
+      return @records if loaded?
+
+      default_scoped = with_default_scope
+
+      if default_scoped.equal?(self)
+        @records = if @readonly_value.nil? && !@klass.locking_enabled?
+          eager_loading? ? find_with_associations : @klass.find_by_sql(arel, @bind_values)
+        else
+          IdentityMap.without do
+            eager_loading? ? find_with_associations : @klass.find_by_sql(arel, @bind_values)
+          end
+        end
+
+        preload = @preload_values
+        preload +=  @includes_values unless eager_loading?
+        preload.each do |associations|
+          ActiveRecord::Associations::Preloader.new(@records, associations).run
+        end
+
+        # @readonly_value is true only if set explicitly. @implicit_readonly is true if there
+        # are JOINS and no explicit SELECT.
+        readonly = @readonly_value.nil? ? @implicit_readonly : @readonly_value
+        @records.each { |record| record.readonly! } if readonly
+      else
+        @records = default_scoped.to_a
+      end
+
+      @loaded = true
+      @records
+    end
+```
+```
+    def size
+      loaded? ? @records.length : count
+    end
+```
+```
+    def scoping
+      @klass.with_scope(self, :overwrite) { yield }
+    end
+```
+```
+    def reload
+      reset
+      to_a # force reload
+      self
+    end
+
+    def reset
+      @first = @last = @to_sql = @order_clause = @scope_for_create = @arel = @loaded = nil
+      @should_eager_load = @join_dependency = nil
+      @records = []
+      self
+    end
+
+    def to_sql
+      @to_sql ||= klass.connection.to_sql(arel, @bind_values.dup)
+    end
+```
+```
+    def where_values_hash
+      equalities = with_default_scope.where_values.grep(Arel::Nodes::Equality).find_all { |node|
+        node.left.relation.name == table_name
+      }
+
+      Hash[equalities.map { |where| [where.left.name, where.right] }].with_indifferent_access
+    end
+```
+```
+    def eager_loading?
+      @should_eager_load ||=
+        @eager_load_values.any? ||
+        @includes_values.any? && (joined_includes_values.any? || references_eager_loaded_tables?)
+    end
+```
+```
+        def scope(name, scope_options = {})
+          name = name.to_sym
+          valid_scope_name?(name)
+          extension = Module.new(&Proc.new) if block_given?
+
+          scope_proc = lambda do |*args|
+            options = scope_options.respond_to?(:call) ? unscoped { scope_options.call(*args) } : scope_options
+            options = scoped.apply_finder_options(options) if options.is_a?(Hash)
+
+            relation = scoped.merge(options)
+
+            extension ? relation.extending(extension) : relation
+          end
+
+          singleton_class.send(:redefine_method, name, &scope_proc)
+        end
+```
+
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>

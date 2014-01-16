@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title>中間管理職 expect さん</title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+                # 中間管理職 expect さん
+
+
+
+```ruby
+describe Person do
+  it "should be a instance" do
+    expect{Person.new}.to be_a(Person)
+  end
+
+  it "should be a instance" do
+    expect(Person.new).to be_a(Person)
+  end
+end
+```
+
+問1
+
+1. 両方テストが通る
+2. 上のテストが通らない
+3. 下のテストが通らない
+4. 両方通らない
+
+
+
+
+解答 2 上のテストが通らない
+
+```ruby
+  1) Person should be a instance
+     Failure/Error: expect{Person.new}.to be_a Person
+       expected #<Proc:0x007fbcf91a75a8@/Users/osada/projects/ruby_test/rspec_test/spec/person_spec.rb:9> to be a kind of Person
+     # ./spec/person_spec.rb:9:in `block (2 levels) in <top (required)>'
+```
+
+
+
+## ソースを読む
+
+
+
+# expect
+```ruby
+    # @example
+    #   expect(something) # => ExpectationTarget wrapping something
+
+    class ExpectationTarget
+      class << self
+        attr_accessor :deprecated_should_enabled
+        alias deprecated_should_enabled? deprecated_should_enabled
+      end
+
+      # @api private
+      def initialize(target)
+        @target = target
+      end
+```
+
+``expect``はただのラッパー。
+ブロックの特別扱いなし。
+</section>
+
+<section>
+  <h2>to</h2>
+  <pre><code>
+      def to(matcher=nil, message=nil, &block)
+        prevent_operator_matchers(:to, matcher)
+        RSpec::Expectations::PositiveExpectationHandler.handle_matcher(@target, matcher, message, &block)
+      end
+  </code></pre>
+  message と block が渡せる<br />
+  委譲先は ```PositiveExpectationHandler```<br />
+  <p class="fragment">では、```not_to```は？</p>
+  <p class="fragment">```NegativeExpectationHandler```</p>
+</section>
+
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+## PositiveExpectationHandler
+
+```ruby
+    class PositiveExpectationHandler < ExpectationHandler
+
+      def self.handle_matcher(actual, matcher, message=nil, &block)
+        check_message(message)
+        ::RSpec::Matchers.last_should = :should
+        ::RSpec::Matchers.last_matcher = matcher
+        return ::RSpec::Matchers::BuiltIn::PositiveOperatorMatcher.new(actual) if matcher.nil?
+```
+
+
+
+# ```::```って何？
+
+> あるクラスまたはモジュールで定義された定数を外部から参照する ためには`::'演算子を用います。
+
+> またObjectクラスで 定義されている定数(トップレベルの定数と言う)を確実に参照する ためには左辺無しの`::'演算子が使えます。
+
+> http://docs.ruby-lang.org/ja/2.0.0/doc/spec=2fvariables.html#const
+
+### 演算子!?
+
+
+
+## つづき
+```ruby
+        match = matcher.matches?(actual, &block)
+        return match if match
+```
+
+block を渡せる matcher と渡せない matcher がある。
+change は渡せない matcher だった。
+
+```ruby
+         def matches?(event_proc)
+           raise_block_syntax_error if block_given?
+
+           @actual_before = evaluate_value_proc
+           event_proc.call
+           @actual_after = evaluate_value_proc
+
+          (!change_expected? || changed?) && matches_before? && matches_after? && matches_expected_delta? && matches_min? && matches_max?
+        end
+```
+
+
+
+## つづき
+```ruby
+        message = message.call if message.respond_to?(:call)
+
+        message ||= matcher.respond_to?(:failure_message_for_should) ?
+                    matcher.failure_message_for_should :
+                    matcher.failure_message
+```
+
+``message`` はここに使われる。
+``message.call``は [class Method](http://docs.ruby-lang.org/ja/2.0.0/class/Method.html)の呼び出しらしく、メソッドを取り出しておくことができるらしい(勉強中)。
+基本的には、デフォルトメッセージの代わりに使うことが多いのでは？
+
+
+
+## 使ってみる
+```ruby
+  it "should be a instance" do
+    expect{Person.new}.to be_a(Person), "通らないヨーダ"
+  end
+```
+
+
+```
+  1) Person should be a instance
+     Failure/Error: expect{Person.new}.to be_a(Person), "通らないヨーダ"
+       通らないヨーダ
+     # ./spec/person_spec.rb:10:in `block (2 levels) in <top (required)>'
+```
+
+
+
+## つづき
+```ruby
+        if matcher.respond_to?(:diffable?) && matcher.diffable?
+          ::RSpec::Expectations.fail_with message, matcher.expected, matcher.actual
+        else
+          ::RSpec::Expectations.fail_with message
+        end
+      end
+    end
+```
+
+### ```diffable?``` ?
+
+
+
+## diffable?
+
+```ruby
+> rspec-expectations-2.14.2/lib/rspec/matchers/built_in/base_matcher.rb
+      def diffable?
+         false
+      end
+
+> rspec-expectations-2.14.2/lib/rspec/matchers/built_in/eq.rb
+        def diffable?; true; end
+
+> rspec-expectations-2.14.2/lib/rspec/matchers/built_in/include.rb
+        def diffable?
+          # Matchers do not diff well, since diff uses their inspect
+          # output, which includes their instance variables and such.
+          @expected.none? { |e| RSpec::Matchers.is_a_matcher?(e) }
+        end
+```
+比較可能な場合において、期待値と実測値を表示するのに使う
+
+
+
+## まとめ
+
+```expect``` でブロックが使えるのは、change などの proc を評価する matcher のみ。
+下記のように書き間違えると、通ってしまうので、お気をつけください。
+```ruby
+  it "should be true" do
+    expect{Person.new}.to be_true
+  end
+```
+
+
+
+## [Built in matchers](https://www.relishapp.com/rspec/rspec-expectations/v/3-0/docs/built-in-matchers)
+
+
+## be_with_in
+
+```expect(27.5).to be_within(0.5).of(27.9)```
+
+27.9±0.5 ならOK
+
+
+## exist
+
+```expect(obj).to exist```
+
+```passes if obj.exist? or obj.exists?```
+
+Dir や File に使うのかな？
+
+
+## match
+
+```expect("a string").to match(/str/)```
+
+This is equivalent to using the =~ matcher
+
+
+## respond_to
+
+```expect([1, 2, 3]).to respond_to(:take).with(1).argument```
+
+引数のチェックまでできる
+
+
+## satisfy
+
+```expect(10).to satisfy { |v| v % 5 == 0 }```
+
+ブロックが渡せる
+
+
+## throw
+
+```expect { throw :foo }.to throw_symbol(:foo)```
+
+どうやって使うんだ？
+
+
+## yield
+
+難しくて説明が出来ない
+
+
+## cover
+
+```expect(1..10).to cover(5)``
+
+range に cover なんてメソッドあったんだね
+
+
+## start_with, end_with
+
+```expect("this string").to end_with "string"```
+
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>

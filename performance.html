@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title></title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+                # 速さが足りない！
+
+
+
+# order と sort とどちらが速いのでしょうか？
+
+
+
+# (゜o゜;
+
+
+
+# 計測し、計測し、計測せよ！
+
+
+
+# generate performance_test
+
+```ruby
+$ rails generate performance_test data_order
+```
+
+```ruby
+       new file:   test/performance/data_order_test.rb
+```
+
+
+# こんなのが作られる
+
+```ruby
+# cat  test/performance/data_order_test.rb
+
+require 'test_helper'
+require 'rails/performance_test_help'
+
+class DataOrderTest < ActionDispatch::PerformanceTest
+  # Refer to the documentation for all available options
+  # self.profile_options = { :runs => 5, :metrics => [:wall_time, :memory]
+  #                          :output => 'tmp/performance', :formats => [:flat] }
+
+  def test_homepage
+    get '/'
+  end
+end
+```
+
+
+# 書き換える
+
+
+# テスト用モデル
+```ruby
+$ rails g model Item name:string cost:integer
+```
+
+```ruby
++  create_table "items", :force => true do |t|
++    t.string   "name"
++    t.integer  "cost"
++    t.datetime "created_at", :null => false
++    t.datetime "updated_at", :null => false
++  end
+```
+
+
+# model のテストに変更
+```ruby
+class DataOrderTest < ActionDispatch::PerformanceTest
+  # Refer to the documentation for all available options
+  # self.profile_options = { runs: 5, metrics: [:wall_time, :memory],
+  #                          output: 'tmp/performance', formats: [:flat] }
+
+  self.profile_options = { runs: 4, metrics: [:process_time] }
+
+  def setup
+    n = 10000
+    now = Time.now
+    items = []
+    n.times do |i|
+      r = rand(1...n)
+      items << Item.new(name: "a#{r}#{i}b", cost: r, created_at: now - r.second)
+    end
+    Item.import(items)
+  end
+```
+
+
+## by id (integer and index)
+```ruby
+  test "order by id" do
+    Item.order("id ASC").to_a
+  end
+
+  test "sort by id" do
+    Item.all.to_a.sort_by{|x| -x.id}
+  end
+```
+
+
+## by created_at (datetime)
+```ruby
+  test "order by created_at" do
+    Item.order("created_at").to_a
+  end
+
+  test "sort_by created_at" do
+    Item.all.sort_by(&:created_at)
+  end
+```
+
+
+## by name (varchar or string)
+```ruby
+  test "order by name" do
+    Item.order("name").to_a
+  end
+
+  test "sort_by name" do
+    Item.all.sort_by(&:name)
+  end
+```
+
+
+## by cost (integer)
+```ruby
+  test "order by cost" do
+    Item.order("cost").to_a
+  end
+
+  test "sort_by cost" do
+    Item.all.sort_by(&:cost)
+  end
+```
+
+
+# 一番遅いのは誰？
+- order by id
+- order by created_at
+- order by cost
+- order by name
+- sort by id
+- sort by created_at
+- sort by cost
+- sort by name
+
+
+# 測る
+```ruby
+$ RAILS_ENV=test be rake test:benchmark
+```
+
+
+# 結果
+![result](performance_ods_-_OpenOffice_Calc.png )
+
+
+# 考察
+- order by id が一番速いはずなのに、どうした？
+- order by name が速いので、**何かがオカシイ！**
+- メモリ容量とかに影響されているようだ
+- sort 系の sql は全て ```SELECT `items`.* FROM `items```` なので、純粋に sort 対象のスピードに依存
+- sort が遅いのは gc が掛かるから
+
+
+# 測る 弐式
+```ruby
+$ RAILS_ENV=test be rake test:peformance
+```
+
+
+# tmp 下に report が出る
+```sh
+$ ls tmp/performance/
+DataOrderTest#test_order_by_cost_process_time.csv         DataOrderTest#test_order_by_id_process_time_graph.html    DataOrderTest#test_sort_by_id_process_time_graph.html
+DataOrderTest#test_order_by_cost_process_time_flat.txt    DataOrderTest#test_order_by_id_process_time_stack.html    DataOrderTest#test_sort_by_id_process_time_stack.html
+DataOrderTest#test_order_by_cost_process_time_graph.html  DataOrderTest#test_order_by_id_process_time_tree.txt      DataOrderTest#test_sort_by_id_process_time_tree.txt
+DataOrderTest#test_order_by_cost_process_time_stack.html  DataOrderTest#test_order_by_name_process_time.csv         DataOrderTest#test_sort_by_name_process_time.csv
+```
+![result_dir](performance_result.png)
+
+
+# こんなのが出ます！
+
+
+# まとめ
+- 正確に測るには環境が大事
+- 正しいデータを取るアイデアを募集中
+- order の方が速い
+
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>

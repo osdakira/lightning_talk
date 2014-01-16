@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title></title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+                # ActiveSupport <Array 編>
+
+
+
+# Array
+
+
+## access.rb
+```ruby
+  def from(position)
+    self[position, length] || []
+  end
+  #   %w( a b c d ).from(2)  # => %w( c d )
+```
+
+
+```ruby
+  def to(position)
+    self.first position + 1
+  end
+  #   %w( a b c d ).to(2)  # => %w( a b c )
+```
+
+
+```
+  def second
+    self[1]
+  end
+```
+
+
+```
+  def third
+    self[2]
+  end
+```
+
+
+```
+  def fourth
+    self[3]
+  end
+```
+
+
+```
+  def fifth
+    self[4]
+  end
+```
+
+
+```
+  def forty_two
+    self[41]
+  end
+```
+
+
+## conversions.rb
+
+
+# to_sentence(options = {})
+```
+[7] pry(main)> (1..5).to_a.to_sentence
+=> "1, 2, 3, 4, and 5"
+```
+```ruby
+    case length
+      when 0
+        ""
+      when 1
+        self[0].to_s.dup
+      when 2
+        "#{self[0]}#{options[:two_words_connector]}#{self[1]}"
+      else
+        "#{self[0...-1].join(options[:words_connector])}#{options[:last_word_connector]}#{self[-1]}"
+    end
+```
+必要なのか！？
+
+
+# to_formatted_s(format = :default)
+to_s(:db)にすると, id だけのリストを返す
+```
+[11] pry(main)> Project.all.to_s(:db)
+  Project Load (1.9ms)  SELECT `projects`.* FROM `projects` WHERE (`projects`.`deleted_at` IS NULL)
+=> "1,3,4,5,6,7,8,9,10,11"
+```
+必要なのか！？
+
+
+# extract_options.rb
+配列の最後が Hash なら取り出す。
+```ruby
+  #   def options(*args)
+  #     args.extract_options!
+  #   end
+  #
+  #   options(1, 2)           # => {}
+  #   options(1, 2, :a => :b) # => {:a=>:b}
+  def extract_options!
+    if last.is_a?(Hash) && last.extractable_options?
+      pop
+    else
+      {}
+    end
+  end
+```
+
+
+## grouping.rb
+
+
+# in_groups_of
+配列を一行当りX個に分ける
+```
+  #   %w(1 2 3 4 5 6 7).in_groups_of(3) {|group| p group}
+  #   ["1", "2", "3"]
+  #   ["4", "5", "6"]
+  #   ["7", nil, nil]
+  #
+  #   %w(1 2 3).in_groups_of(2, '&nbsp;') {|group| p group}
+  #   ["1", "2"]
+  #   ["3", "&nbsp;"]
+  #
+  #   %w(1 2 3).in_groups_of(2, false) {|group| p group}
+  #   ["1", "2"]
+  #   ["3"]
+```
+
+
+```ruby
+  def in_groups_of(number, fill_with = nil)
+    if fill_with == false
+      collection = self
+    else
+      # size % number gives how many extra we have;
+      # subtracting from number gives how many to add;
+      # modulo number ensures we don't add group of just fill.
+      padding = (number - size % number) % number
+      collection = dup.concat([fill_with] * padding)
+    end
+
+    if block_given?
+      collection.each_slice(number) { |slice| yield(slice) }
+    else
+      groups = []
+      collection.each_slice(number) { |group| groups << group }
+      groups
+    end
+  end
+```
+
+
+# in_groups
+配列を**一列**当りX個に分ける
+```
+  #   %w(1 2 3 4 5 6 7 8 9 10).in_groups(3) {|group| p group}
+  #   ["1", "2", "3", "4"]
+  #   ["5", "6", "7", nil]
+  #   ["8", "9", "10", nil]
+  #
+  #   %w(1 2 3 4 5 6 7).in_groups(3, '&nbsp;') {|group| p group}
+  #   ["1", "2", "3"]
+  #   ["4", "5", "&nbsp;"]
+  #   ["6", "7", "&nbsp;"]
+  #
+  #   %w(1 2 3 4 5 6 7).in_groups(3, false) {|group| p group}
+  #   ["1", "2", "3"]
+  #   ["4", "5"]
+  #   ["6", "7"]
+```
+
+
+```
+  def in_groups(number, fill_with = nil)
+    # size / number gives minor group size;
+    # size % number gives how many objects need extra accommodation;
+    # each group hold either division or division + 1 items.
+    division = size / number
+    modulo = size % number
+
+    # create a new array avoiding dup
+    groups = []
+    start = 0
+
+    number.times do |index|
+      length = division + (modulo > 0 && modulo > index ? 1 : 0)
+      padding = fill_with != false &&
+        modulo > 0 && length == division ? 1 : 0
+      groups << slice(start, length).concat([fill_with] * padding)
+      start += length
+    end
+
+    if block_given?
+      groups.each { |g| yield(g) }
+    else
+      groups
+    end
+  end
+```
+
+
+# split
+配列を split する
+```
+  #   [1, 2, 3, 4, 5].split(3)                # => [[1, 2], [4, 5]]
+  #   (1..10).to_a.split { |i| i % 3 == 0 }   # => [[1, 2], [4, 5], [7, 8], [10]]
+  def split(value = nil)
+    using_block = block_given?
+
+    inject([[]]) do |results, element|
+      if (using_block && yield(element)) || (value == element)
+        results << []
+      else
+        results.last << element
+      end
+
+      results
+    end
+  end
+```
+
+
+## prepend_and_append.rb
+
+
+```
+class Array
+  alias_method :append,  :<<
+  alias_method :prepend, :unshift
+end
+```
+**短っ！**
+`append`と`prepend`の方が読みやすい？
+
+
+## random_access.rb
+
+
+# sample(n=nil)
+ランダム取り出し
+```
+  #   [1,2,3,4,5,6].sample     # => 4
+  #   [1,2,3,4,5,6].sample(3)  # => [2, 4, 5]
+  #   [1,2,3,4,5,6].sample(-3) # => ArgumentError: negative array size
+  #              [].sample     # => nil
+  #              [].sample(3)  # => []
+```
+
+
+```ruby
+  def sample(n=nil)
+    return self[Kernel.rand(size)] if n.nil?
+    n = n.to_int
+  rescue Exception => e
+    raise TypeError, "Coercion error: #{n.inspect}.to_int => Integer failed:\n(#{e.message})"
+  else
+    raise TypeError, "Coercion error: obj.to_int did NOT return an Integer (was #{n.class})" unless n.kind_of? Integer
+    raise ArgumentError, "negative array size" if n < 0
+    n = size if n > size
+    result = Array.new(self)
+    n.times do |i|
+      r = i + Kernel.rand(size - i)
+      result[i], result[r] = result[r], result[i]
+    end
+    result[n..size] = []
+    result
+  end unless method_defined? :sample
+end
+```
+ランダムな位置と末尾側を入れ替えて、末尾だけ返す
+
+
+## uniq_by.rb
+```
+  #   [1, 2, 3, 4].uniq_by { |i| i.odd? } # => [1, 2]
+```
+```ruby
+  def uniq_by
+    hash, array = {}, []
+    each { |i| hash[yield(i)] ||= (array << i) }
+    array
+  end
+
+  # Same as uniq_by, but modifies self.
+  def uniq_by!
+    replace(uniq_by{ |i| yield(i) })
+  end
+```
+- 自己破壊型は replace で実現できる
+
+
+## wrap.rb
+なんでも配列にして返す
+```
+  #   Array.wrap(nil)       # => []
+  #   Array.wrap([1, 2, 3]) # => [1, 2, 3]
+  #   Array.wrap(0)         # => [0]
+```
+
+
+```
+  def self.wrap(object)
+    if object.nil?
+      []
+    elsif object.respond_to?(:to_ary)
+      object.to_ary || [object]
+    else
+      [object]
+    end
+  end
+```
+
+
+# まとめ
+- `array.first` には引数が渡せる
+- `users.from(2)` と `users[2..-1]` どちらが読みやすい？
+- `users.to(2)` と `users[0..2]` どちらが読みやすい？
+- `users.second` と `users[1]` どちらが読みやすい？
+- `users.to_s(:db)` と users.map(&:id).join(",") どちらが読みやすい？
+- `prepend`と`append`の方が読みやすい？
+- `in_groups_of, in_groups` ロジックが勉強になった
+- `to_sentence` いつ使うの？
+- `sample, uniq_by, split, extract_options!`
+- `Array.wrap` は 使えそう
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>

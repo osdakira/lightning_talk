@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title>中間管理職 expect さん</title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+# remote=true? 遠距離でも長持ちする秘訣
+
+
+
+# 普通のリンクが
+```ruby
+      <td><%= link_to 'Show', person %></td>
+```
+
+
+
+# Ajax 通信に！
+```ruby
+      <td><%= link_to 'Show', person, remote: true  %></td>
+```
+
+
+
+# Rails スゲぇ！！！
+
+
+
+# 普通のリンクが
+```html
+      <a href="/people/2">Show</a>
+```
+
+
+
+# Ajax 通信に！
+```html
+      <a data-remote="true" href="/people/2">Show</a>
+```
+
+
+
+# jQuery じゃねぇか！www
+
+
+
+# data-remote
+
+`a data-remote` は jquery_ujs.js の`linkClickSelector`に定義されている。
+
+```js
+linkClickSelector: 'a[data-confirm], a[data-method], a[data-remote], a[data-disable-with]',
+```
+
+
+
+# linkClickSelector
+
+`linkClickSelector` は `$document.delegate(rails.linkClickSelector, 'click.rails', function(e) {` の中で、`rails.handleRemote(link);`で呼び出されている
+
+```js
+$document.delegate(rails.linkClickSelector, 'click.rails', function(e) {
+      var link = $(this), method = link.data('method'), data = link.data('params');
+      if (!rails.allowAction(link)) return rails.stopEverything(e);
+
+      if (link.is(rails.linkDisableSelector)) rails.disableElement(link);
+
+      if (link.data('remote') !== undefined) {
+        if ( (e.metaKey || e.ctrlKey) && (!method || method === 'GET') && !data ) { return true; }
+
+        var handleRemote = rails.handleRemote(link);
+        // response from rails.handleRemote() will either be false or a deferred object promise.
+        if (handleRemote === false) {
+          rails.enableElement(link);
+        } else {
+          handleRemote.error( function() { rails.enableElement(link); } );
+        }
+        return false;
+
+      } else if (link.data('method')) {
+        rails.handleMethod(link);
+        return false;
+      }
+    });
+```
+
+
+
+# 横道
+
+- `!rails.allowAction(link)` は `data-confirm='Are you sure?'`を呼び、返り値によって処理を止める
+- `rails.linkDisableSelector`は`data-disable-with`が付いているか判定。`disableSelector: 'input[data-disable-with], button[data-disable-with], textarea[data-disable-with]',`
+- `(e.metaKey || e.ctrlKey)` meta か ctrl が押されていたら、ajax 発動しないのか……
+
+
+
+# handleRemote 抜粋
+```js
+    handleRemote: function(element) {
+      var method, url, data, elCrossDomain, crossDomain, withCredentials, dataType, options;
+      if (rails.fire(element, 'ajax:before')) {
+        elCrossDomain = element.data('cross-domain');
+        crossDomain = elCrossDomain === undefined ? null : elCrossDomain;
+        withCredentials = element.data('with-credentials') || null;
+        dataType = element.data('type') || ($.ajaxSettings && $.ajaxSettings.dataType);
+
+        if (element.is('form')) {
+        } else if (element.is(rails.inputChangeSelector)) {
+        } else if (element.is(rails.buttonClickSelector)) {
+        } else {
+          method = element.data('method');
+          url = rails.href(element);
+          data = element.data('params') || null;
+        }
+```
+`link`は`else`で発動。
+
+
+
+# options
+```js
+        options = {
+          type: method || 'GET', data: data, dataType: dataType,
+          // stopping the "ajax:beforeSend" event will cancel the ajax request
+          beforeSend: function(xhr, settings) {
+            if (settings.dataType === undefined) {
+              xhr.setRequestHeader('accept', '*/*;q=0.5, ' + settings.accepts.script);
+            }
+            return rails.fire(element, 'ajax:beforeSend', [xhr, settings]);
+          },
+          success: function(data, status, xhr) {
+            element.trigger('ajax:success', [data, status, xhr]);
+          },
+          complete: function(xhr, status) {
+            element.trigger('ajax:complete', [xhr, status]);
+          },
+          error: function(xhr, status, error) {
+            element.trigger('ajax:error', [xhr, status, error]);
+          },
+          crossDomain: crossDomain
+        };
+```
+- デフォルトの`method`は`GET`
+- `beforeSend`は`setRequestHeader`を使って、自分が`javascript`だと伝えているよ
+- `success, complete, error`は`ajax:hoge`に委譲。
+- `crossDomain` はここで設定
+
+
+
+# ajax
+```js
+        // There is no withCredentials for IE6-8 when
+        // "Enable native XMLHTTP support" is disabled
+        if (withCredentials) {
+          options.xhrFields = {
+            withCredentials: withCredentials
+          };
+        }
+
+        // Only pass url to `ajax` options if not blank
+        if (url) { options.url = url; }
+
+        var jqxhr = rails.ajax(options);
+        element.trigger('ajax:send', jqxhr);
+        return jqxhr;
+      } else {
+        return false;
+      }
+```
+- `withCredentials`があれば、`xhrFields`に付ける
+- `url`があれば、それを使う。今回はリンクなので、`url`に`href`が入ってくる
+- ついに、`ajax`をコール!
+- トリガーしてから、リターン。
+
+
+
+# trigger
+
+javascript はとにかく、`trigger`の文化の気がする。`bind(名前, 関数)`として、ある関数を、名前で登録しておいて、`trigger(名前)`と発動させる。ちょっとクラス変数っぽい。そしてライブラリの中でトリガーポイントが用意されていて、外部からの割り込みを容易にしている。
+
+- 参考: [開放/閉鎖原則 - Wikipedia](http://ja.wikipedia.org/wiki/%E9%96%8B%E6%94%BE/%E9%96%89%E9%8E%96%E5%8E%9F%E5%89%87)
+
+
+
+# リンクが押された後はどうなるの？
+
+
+
+# 押して見る
+
+
+
+# Rails log
+```sh
+Started GET "/people/2" for 127.0.0.1 at 2013-11-28 00:13:40 +0900
+Processing by PeopleController#show as JS
+  Parameters: {"id"=>"2"}
+  Person Load (0.4ms)  SELECT `people`.* FROM `people` WHERE `people`.`id` = 2 LIMIT 1
+  Rendered people/show.html.erb within layouts/application (0.4ms)
+Completed 200 OK in 12ms (Views: 10.3ms | ActiveRecord: 0.4ms)
+```
+
+- `as JS` が来ている
+- `show.html.erb` を返している。
+- `json` じゃないんだ？
+
+
+
+# data-type: json にしたい！
+
+`<td><%= link_to 'Show', person, remote: true, dataType: "json" %></td>`
+`<a data-remote="true" href="/people/2" datatype="json">Show</a>`
+失敗
+
+`<td><%= link_to 'Show', person, remote: true, type: "json" %></td>`
+`<a data-remote="true" href="/people/2" type="json">Show</a>`
+失敗
+
+
+
+# ソースと共にあらんことを
+
+`ruby/2.0.0/gems/actionpack-4.0.0.beta1/lib/action_view/helpers/url_helper.rb`
+```ruby
+      def link_to(name = nil, options = nil, html_options = nil, &block)
+        html_options, options = options, name if block_given?
+        options ||= {}
+
+        html_options = convert_options_to_data_attributes(options, html_options)
+
+        url = url_for(options)
+        html_options['href'] ||= url
+
+        content_tag(:a, name || url, html_options, &block)
+      end
+```
+- なんかブロック渡せるぞ？
+- `content_tag_string(name, capture(&block), options, escape)`
+- いろいろあって、それは`text node`になるらしい。
+
+
+
+# 脇道
+```ruby
+        def convert_options_to_data_attributes(options, html_options)
+            if confirm
+              message = ":confirm option is deprecated and will be removed from Rails 4.1. " \
+                        "Use 'data: { confirm: \'Text\' }' instead."
+            end
+            if disable_with
+              message = ":disable_with option is deprecated and will be removed from Rails 4.1. " \
+                        "Use 'data: { disable_with: \'Text\' }' instead."
+```
+- `: confirm`, `:disable_with`は `:data` ハッシュの属性にするようになったらしい
+- data のハッシュに渡すと、何やかんやあって、`data-hoge`にしてくれる。
+```ruby
+        def data_tag_option(key, value, escape)
+          key   = "data-#{key.to_s.dasherize}"
+          unless value.is_a?(String) || value.is_a?(Symbol) || value.is_a?(BigDecimal)
+            value = value.to_json
+          end
+          tag_option(key, value, escape)
+        end
+```
+
+
+
+# data: {type: :json}
+`<td><%= link_to 'Show', person, remote: true, data: { type: :json } %></td>`
+`<a data-remote="true" data-type="json" href="/people/2">Show</a>`
+正解！
+
+```sh
+Started GET "/people/2" for 127.0.0.1 at 2013-11-28 00:31:39 +0900
+Processing by PeopleController#show as JSON
+  Parameters: {"id"=>"2"}
+  Person Load (0.4ms)  SELECT `people`.* FROM `people` WHERE `people`.`id` = 2 LIMIT 1
+  Rendered people/show.json.jbuilder (0.8ms)
+Completed 200 OK in 10ms (Views: 8.0ms | ActiveRecord: 0.4ms)
+```
+
+
+
+# show.json.jbuilder
+```js
+json.extract! @person, :name, :age, :created_at, :updated_at
+```
+- rails 4 の `template` には、`json.jbuilder` が付いている
+> JbuilderはJSONレスポンスを出力するテンプレートエンジンです。
+> [#320 Jbuilder - RailsCasts](http://railscasts.com/episodes/320-jbuilder?language=ja&view=asciicast)
+- as_json をモデルレベルでカスタマイズしなくても良い
+
+
+
+# Request Header (抜粋)
+
+data-type: :json がないとき
+```
+Request URL:http://0.0.0.0:3000/people/2
+Request Method:GET
+Status Code:200 OK
+Request Headers
+Accept:*/*;q=0.5, text/javascript, application/javascript, application/ecmascript, application/x-ecmascript
+X-CSRF-Token:9t4ucSSmmMOBf+KP71u4cqgFxoxWGlyZETc8FJNbQC4=
+X-Requested-With:XMLHttpRequest
+```
+
+data-type: :json があるとき
+```
+Request URL:http://0.0.0.0:3000/people/2
+Request Method:GET
+Status Code:200 OK
+Request Headers
+Accept:application/json, text/javascript, */*; q=0.01
+X-CSRF-Token:9t4ucSSmmMOBf+KP71u4cqgFxoxWGlyZETc8FJNbQC4=
+X-Requested-With:XMLHttpRequest
+```
+
+
+
+# その後は？
+
+
+
+# js.erb を render してみる
+- `<td><%= link_to 'Show', person, remote: true %></td>`
+- `show.js.erb`作ってみた
+
+```sh
+Started GET "/people/2" for 127.0.0.1 at 2013-11-28 01:02:22 +0900
+Processing by PeopleController#show as JS
+  Parameters: {"id"=>"2"}
+  Person Load (21.8ms)  SELECT `people`.* FROM `people` WHERE `people`.`id` = 2 LIMIT 1
+  Rendered people/show.js.erb (1.0ms)
+Completed 200 OK in 35ms (Views: 11.9ms | ActiveRecord: 21.8ms)
+```
+
+`js.erb`返って来た。
+
+
+
+# 自分でページを書き換えるのが主流？
+```ruby
+$("body").html("<%= j(render file: 'people/show.html.erb') %>")
+  ↓↓↓
+$("body").html("<p id=\"notice\"><\/p>\n\n<p>\n  <strong>Name:<\/strong>\n  b\n<\/p>\n\n<p>\n  <strong>Age:<\/strong>\n  2\n<\/p>\n\n\n<a href=\"/people/2/edit\">Edit<\/a> |\n<a href=\"/people\">Back<\/a>\n")
+```
+- ajax で ↑ が返ってきて、そのまま解釈されて実行される。
+
+
+
+# ハンドラ登録するのが普通？
+```js
+$ ->
+  $("body").on 'ajax:success', (data, status, xhr) ->
+      $("body").html(data)
+```
+と思ったんだけど、このサンプルが動かなかった。なぜ？
+
+
+
+# まとめ
+- remote: true は ajax で投げる
+- data: {type: :hoge} で :format の指定可能
+- 返ってくる値を制御するのは、自前？
+
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>

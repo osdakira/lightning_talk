@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title></title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+## Gem を作ってみた！
+## Devtools Terminal の紹介
+## 2014/01/16 @osada
+
+
+# Gem を作ってみた!
+
+
+### `Rails 4.1` の新機能 `enum`
+
+```
+class Article < ActiveRecord::Base
+  enum status: [ :draft, :published ]
+end
+
+article = Article.new
+article.draft? # => false
+article.draft!
+article.draft? # => true
+article.status # => "draft"
+
+Article.draft # => Article.where(status: 0)
+```
+
+
+### 排他関係ではない状態が欲しい!
+
+```
+class User < ActiveRecord::Base
+  enum role: [ :manger, :player ]
+end
+```
+
+> user.playing_manager?
+
+
+### bitwise_enum を作ってみた!
+
+```
+class User < ActiveRecord::Base
+  bitwise_enum role: [ :manager, :player ]
+end
+
+user = User.new
+user.manager!
+user.manager? # => true
+user.player!
+user.player? # => true
+user.role    # => "['manager', 'player']"
+```
+
+
+### gem にしてみた!
+
+```
+$ bundle gem bitwise_enum
+      create  bitwise_enum/Gemfile
+      create  bitwise_enum/Rakefile
+      create  bitwise_enum/LICENSE.txt
+      create  bitwise_enum/README.md
+      create  bitwise_enum/.gitignore
+      create  bitwise_enum/bitwise_enum.gemspec
+      create  bitwise_enum/lib/bitwise_enum.rb
+      create  bitwise_enum/lib/bitwise_enum/version.rb
+```
+
+> lib/bitwise_enum.rb に書いていく
+
+
+### .gemspec
+- gem の依存関係を記述
+
+```
+lib = File.expand_path('../lib', __FILE__)
+$LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
+require 'bitwise_enum/version'
+
+Gem::Specification.new do |spec|
+  spec.name          = "bitwise_enum"
+  spec.version       = BitwiseEnum::VERSION
+  spec.authors       = ["Akira Osada"]
+  spec.email         = ["osd.akira@gmail.com"]
+  spec.description   = %q{ This is the implementation of OR enum. It has been implemented in bit operation. }
+  spec.summary       = spec.description
+  spec.homepage      = ""
+  spec.license       = "MIT"
+
+  spec.files         = `git ls-files`.split($/)
+  spec.executables   = spec.files.grep(%r{^bin/}) { |f| File.basename(f) }
+  spec.test_files    = spec.files.grep(%r{^(test|spec|features)/})
+  spec.require_paths = ["lib"]
+
+  spec.add_development_dependency "bundler", "~> 1.3"
+  spec.add_development_dependency "rake"
+end
+```
+
+
+### build
+```
+$ gem build bitwise_enum.gemspec
+
+WARNING:  no homepage specified
+WARNING:  open-ended dependency on rake (>= 0, development) is not recommended
+  if rake is semantically versioned, use:
+    add_development_dependency 'rake', '~> 0'
+WARNING:  See http://guides.rubygems.org/specification-reference/ for help
+  Successfully built RubyGem
+  Name: bitwise_enum
+  Version: 0.0.1
+  File: bitwise_enum-0.0.1.gem
+```
+
+
+### install
+```
+$ gem install bitwise_enum-0.0.1.gem
+Successfully installed bitwise_enum-0.0.1
+1 gem installed
+
+$ gem which bitwise_enum
+/Users/osada/.homebrew/var/rbenv/versions/2.1.0/lib/ruby/gems/2.1.0/gems/bitwise_enum-0.0.1/lib/bitwise_enum.rb
+
+$ cd /Users/osada/.homebrew/var/rbenv/versions/2.1.0/lib/ruby/gems/2.1.0/gems/bitwise_enum-0.0.1/
+$ ls
+Gemfile               LICENSE.txt           README.md             Rakefile              bitwise_enum.gemspec  lib/                  test/
+```
+
+
+### rake release
+`rake release` で `Rubygems` に登録されるらしいけど、
+`bundler` なら、`github` に置いておけば良いのでやっていない
+
+
+# 実は他に
+
+
+### Rails plugin という方法もある
+```
+$ rails plugin new yaffle
+```
+> acts_as シリーズは、Rails plugin !
+
+
+### テストが書きづらい
+> ActiveRecord だけに依存し、Rails を要求しなかったら、rspec が動かなくてテストに困った。
+
+
+# まとめ
+- ドメインに依存しないものは gem にするとソースが少なくて済む
+- rspec を使いたければ、rails plugin か？作ってみたい。
+- gem を作るのは以外と簡単
+
+
+# おまけ
+
+> 便利ツール紹介
+> Devtools Terminal の紹介
+
+demo
+
+
+
+                # THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>
