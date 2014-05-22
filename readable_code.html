@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ja">
+
+	<head>
+		<meta charset="utf-8">
+
+		<title></title>
+
+		<meta name="description" content="">
+		<meta name="author" content="Akira Osada">
+
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<link rel="stylesheet" href="css/reveal.min.css">
+		<link rel="stylesheet" href="css/theme/default.css" id="theme">
+
+		<!-- For syntax highlighting -->
+		<link rel="stylesheet" href="lib/css/zenburn.css">
+
+		<!-- If the query includes 'print-pdf', use the PDF print sheet -->
+		<script>
+			document.write( '<link rel="stylesheet" href="css/print/' + ( window.location.search.match( /print-pdf/gi ) ? 'pdf' : 'paper' ) + '.css" type="text/css" media="print">' );
+		</script>
+
+		<!--[if lt IE 9]>
+		<script src="lib/js/html5shiv.js"></script>
+		<![endif]-->
+	</head>
+
+	<body>
+
+		<div class="reveal">
+
+			<!-- Any section element inside of this container is displayed as a slide -->
+			<div class="slides">
+              <section data-markdown data-separator="^\n\n\n" data-vertical="^\n\n" data-notes="^Note:" data-charset="utf-8">
+              # リーダブルコード
+
+
+
+# アジェンダ
+- リーダブルコードの1，2章を紹介
+- 32枚のスライド
+- 10分で終わりたい
+- 1枚 18 秒で話します。
+- 分からなかったらスミマセン。
+
+
+
+## 優れたコードって何？
+
+
+
+## どっちが読みやすい？
+
+```c
+return exponent >= 0 ? mantissa * (1 << exponent) : mantissa / (1 << -exponent);
+```
+
+```c
+if(exponent >= 0){
+  return mantissa * (1 << exponent)
+}else{
+  return mantissa / (1 << -exponent)
+}
+```
+
+「簡潔さ」と「安心」はどちらが大切？
+
+
+
+# 読みやすさの基本定理
+
+
+
+## `コードは他の人が最短時間で理解できるように書かなければならない`
+
+
+
+# 最短？
+
+
+
+## 小さなことは絶対にいいこと？
+
+```c
+assert((!(bucket=FindBucket(key))) || !bucket->ISOccupied());
+
+bucket=findBucket(key);
+if(bucket!=NULL) assert(!bucket->IsOccupied());
+```
+
+
+
+## コメント
+
+```c
+// "hash = (65599 * hash) + c の高速版"
+hash = (hash << 6) + (hash << 16) - hash + c;
+```
+長くなるけど理解しやすいこともある
+
+
+
+## 名前に情報を詰め込む
+1. 明確な単語を選ぶ
+2. 汎用的な名前を避ける(使う状況を選ぶ)
+3. 抽象的な名前よりも具体的な名前を使う
+4. 接尾辞や接頭辞を使って情報を追加する
+5. 名前の長さを決める
+6. 名前のフォーマットで情報を伝える
+
+
+
+## 明確な単語を選ぶ
+
+```c
+getPage(url)
+```
+
+何か問題がある？
+
+
+
+> get からは何も伝わってこない。どこから取ってくるのだろう？
+>
+> ローカルキャッシュから？データベースから？インターネットから？
+>
+> インターネットからならば、FetchPage() や DownloadPage() の方が明確だ
+
+
+
+## もっと「カラフル」な単語を探す
+
+|      |    |
+|:----:|:---:|
+| send | deliver, dispatch, announce, distribute, route|
+| find | search, extract, locate, recover|
+| start | launch, create, begin, open|
+| make | create, set up, build, generate, compose, add, new
+
+シソーラス(類語辞典)を使って調べよう
+
+
+
+## 気取った言い回しよりも明確で正確な方がいい
+
+
+
+## tmp や retval などの 汎用的な名前を避ける
+
+> retval という名前には情報がない。変数の値を表すような名前を使おう。
+
+
+
+## 良いtmp
+```
+if(right < left){
+  tmp = right;
+  right = left;
+  left = tmp;
+}
+```
+
+
+
+## 悪いtmp
+
+```
+String tmp = user.name();
+tmp += " " + user.phone_number();
+tmp += " " + useremail();
+template.set("user_info", "tmp");
+```
+
+
+
+## 抽象的な名前よりも具体的な名前を使う
+
+
+
+ServerCanStart
+
+
+
+CanLisenOnPort
+
+
+
+
+## 名前は短いコメントのようなもの
+
+
+
+## バグはどこ？
+
+```javascript
+var start = (new Date()).getTime();
+...
+var elapsed = (new Date()).getTime() - start;
+console.log("読み込み時間:" + elapsed + " 秒");
+```
+
+
+
+## 値の単位
+```
+var start_ms = (new Date()).getTime();
+...
+var elapsed_ms = (new Date()).getTime() - start;
+console.log("読み込み時間:" + elapsed_ms / 1000 + " 秒");
+```
+
+
+
+## その他の重要な属性を追加する
+
+|状況|変数名|改善後|
+|:--:|:--:|:--:|
+|平文のpassword|password|**plaintext_**password|
+|ユーザのコメント|commment|**unescapded_**comment|
+|html の文字コードをutf-8に|html|html**_utf8**|
+|data を URL エンコードした|data|data**_urlenc**|
+
+> 全ての変数に追加しろということではない。
+> 変数の意味を間違えてしまった時にバグになりそうなところにだけ使う
+
+
+
+## 名前の長さを決める
+
+- **長い名前はダメ**
+- じゃあ、1単語、1文字 ？
+
+`d, days, days_since_last_update`
+
+
+
+## スコープが小さければ、短い名前でもいい
+
+スコープ(その名前が「見える」コードの行数)が小さければ、多くの情報を詰め込む必要はない
+
+```cpp
+if(debug){
+  map&lt;string,int> m;
+  LookUpNamesNumbers(&m);
+  Print(m);
+}
+```
+
+もしグローバル変数だったなら、何をしているか分からない
+
+```cpp
+  LookUpNamesNumbers(&m);
+  Print(m);
+```
+
+
+
+## 長い名前を入力するのは問題じゃない
+
+補完を使おう
+
+
+
+## 頭文字と省略形
+
+- BackEndManager → BEManger
+
+- **プロジェクト固有の**省略形はダメだ。
+> 新しいチームメイトはその名前の意味を理解できるだろうか？
+
+- evaluation ->
+- document ->
+- string ->
+
+
+
+## 不要な単語を投げ捨てる
+
+- ConvertToString() -> ToString()
+- DoServeLoop() -> ServeLoop()
+
+
+
+## 名前のフォーマットで情報を伝える
+
+Google C++ フォーマット
+
+```cpp
+
+static const int **kMaxOpenFiles** = 100;
+
+class **LogReader** {
+  public:
+    void **OpenFiles**(string **local_file**);
+
+  private:
+    int **offset_**;
+    **DISALLOW_COPY_AND_ASSIGN**(LogReader);
+};
+```
+
+- クラス名は **CameCase**
+- 変数名は **lower_separated**
+- 定数は **kConstantName**
+- マクロ **MACRO_NAME**
+- メンバ変数 **offset_**
+
+
+
+## その他のフォーマット規約
+
+### javascript
+- コンストラクタは大文字で始める
+- メソッドは小文字で始める
+- jQuery オブジェクトは $ を付ける
+
+### html+css
+- id は アンダースコア
+- class は ハイフン
+
+
+
+## まとめ
+- 明確な単語を選ぶ
+- 汎用的な名前を避ける
+- 具体的な名前を使って物事を詳細に説明する
+- 変数名に大切な情報を追加する
+- スコープの大きな変数には長い名前を付ける
+- 大文字やアンダースコアに意味を含める
+
+
+
+## 次回
+
+誤解されない名前
+
+
+
+# THE END
+              </section>
+			</div>
+		</div>
+
+		<script src="lib/js/head.min.js"></script>
+		<script src="js/reveal.min.js"></script>
+
+		<script>
+
+			// Full list of configuration options available here:
+			// https://github.com/hakimel/reveal.js#configuration
+			Reveal.initialize({
+				controls: true,
+				progress: true,
+				history: true,
+				center: true,
+
+				theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+				transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+				// Optional libraries used to extend on reveal.js
+				dependencies: [
+					{ src: 'lib/js/classList.js', condition: function() { return !document.body.classList; } },
+					{ src: 'plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+					{ src: 'plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } },
+					{ src: 'plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+					{ src: 'plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }
+				]
+			});
+
+		</script>
+
+	</body>
+</html>
